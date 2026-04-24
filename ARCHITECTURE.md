@@ -11,63 +11,128 @@
 3. **Context isolation** — Each assistant maintains independent conversation boundaries
 4. **Safe-first routing** — Uncertain messages default to private delivery
 
-## Communication Modes
-
-### Mode 1: Direct Webhook
+## Architecture: 6 Layers
 
 ```
-Assistant A ──HTTP POST──► Assistant B Webhook
-  POST /webhooks/agent-bus
-  {"sender": "AssistantA", "message": "..."}
+┌─────────────────────────────────────────────────────┐
+│ L6: Protocol Layer (IACP Spec)                       │
+│   Message format, routing rules, transport-agnostic  │
+├─────────────────────────────────────────────────────┤
+│ L5: Context Isolation                                │
+│   Message classifier, 4-domain architecture,         │
+│   working memory lifecycle                           │
+├─────────────────────────────────────────────────────┤
+│ L4: Production Cutover                               │
+│   Dual-write bridge, zero-downtime switch,           │
+│   automatic rollback, data migration                 │
+├─────────────────────────────────────────────────────┤
+│ L3: Monitoring & Operations                          │
+│   Prometheus metrics, health checks, latency         │
+│   histograms, structured logging, systemd, dashboard │
+├─────────────────────────────────────────────────────┤
+│ L2: Reliable Communication Layer                     │
+│   ACK (500ms), retry with exponential backoff,       │
+│   LRU dedup (1000 entries), offline queue, replay    │
+├─────────────────────────────────────────────────────┤
+│ L1: WebSocket Relay                                  │
+│   Custom WS server, client auth (x-client-id),       │
+│   heartbeat (15s), message routing, auto-reconnect   │
+└─────────────────────────────────────────────────────┘
 ```
 
-- **Latency**: < 1s
-- **Reliability**: High (synchronous HTTP response)
-- **Use case**: Task delegation, needs confirmation of receipt
+### L1: WebSocket Relay
 
-### Mode 2: Shared Channel @mention
+Custom-built WebSocket bridge server with:
+- Client authentication via `x-client-id` header
+- Bidirectional message routing between assistants
+- Heartbeat detection (ping/pong, configurable interval)
+- Auto-reconnect with exponential backoff
+- Duplicate connection rejection
+- Structured logging (JSONL)
+- Health check endpoint (`/health`)
+- Graceful shutdown (SIGTERM/SIGINT)
+
+**Performance**: ~2-5ms message latency, ~1s reconnect time, ~20MB memory usage.
+
+### L2: Reliable Communication Layer
+
+Wraps raw WebSocket with production-grade reliability:
+
+| Feature | Description |
+|---------|-------------|
+| **ACK** | 500ms ACK timeout per message, auto-retry on timeout |
+| **Retry** | Exponential backoff + jitter: 1s → 3s → 7s, max 3 retries |
+| **Idempotency** | LRU cache (1000 entries, 5min TTL), deduplicates by msg_id |
+| **Offline Queue** | JSONL file buffer, auto-replay on reconnect |
+| **Heartbeat** | App-layer ping/pong every 15s, 10s timeout → reconnect |
+| **Reconnect** | Exponential backoff: 1s → 2s → 4s → 8s → 16s → max 30s |
+
+### L3: Monitoring & Operations
+
+Production-grade monitoring capabilities:
+- Prometheus metrics endpoint (`/metrics`) — connection count, message counters, latency histograms
+- Health check endpoint (`/health`) — connection status, uptime
+- Structured logging with logrotate
+- systemd integration — auto-restart, graceful shutdown
+- Real-time monitoring dashboard (pure frontend)
+
+### L4: Production Cutover
+
+Zero-downtime migration from legacy file-based communication to WebSocket:
+- **Dual-write bridge** — simultaneously writes to file + WS during transition
+- **Phased cutover** — 5 stages (prepare → dual-write → observe → switch-read → switch-write)
+- **Automatic rollback** — triggers on WS latency > 500ms, disconnect > 2min, or message loss > 0.1%
+- **Historical data migration** — converts legacy file messages to WS v2 format
+- **Health check** — real-time status monitoring during cutover
+
+### L5: Context Isolation
+
+Prevents cross-contamination between assistant conversations:
 
 ```
-Assistant B ──IM Message──► Shared Group Chat ──► Assistant A (via @)
-  "@AssistantA please do X"
+┌─────────────────────────────────────────────┐
+│              Main Context Window             │
+│                                              │
+│  ┌─ SESSION Domain ────────────────────┐    │
+│  │  Session-level: core task, identity  │    │
+│  │  Isolated from: chat logs, history   │    │
+│  └──────────────────────────────────────┘    │
+│  ┌─ CHANNEL Domain ────────────────────┐    │
+│  │  Per-channel context, no crossover   │    │
+│  │  Between: group A / group B / DM     │    │
+│  └──────────────────────────────────────┘    │
+│  ┌─ MESSAGE_STREAM Domain ─────────────┐    │
+│  │  Classified message streams          │    │
+│  │  TASK vs REPORT vs CHATTER           │    │
+│  └──────────────────────────────────────┘    │
+│  ┌─ WORKING_MEMORY Domain ─────────────┐    │
+│  │  Task-level short-term memory        │    │
+│  │  Cleared after task completion       │    │
+│  └──────────────────────────────────────┘    │
+└─────────────────────────────────────────────┘
 ```
 
-- **Latency**: Depends on polling interval
-- **Reliability**: Medium (async, depends on IM availability)
-- **Use case**: Simple notifications, async requests
+**Message Classifier**: Deterministic regex patterns (not LLM) for classification:
+- **TASK**: `^帮我.*`, `^处理.*`, `^创建.*` → triggers execution
+- **REPORT**: `.*(今天|今日).*(做了|完成|进度)` → log only
+- **CHATTER**: `^(好的|收到|谢谢|👍)$`, `^.{1,5}$` → ignore or lightweight reply
 
-### Mode 3: Agent Proxy
+### L6: Protocol Layer
 
-```
-Assistant B ──HTTP POST──► Assistant A Proxy ──► Assistant A Gateway
-  POST /agent
-  {"sender": "AssistantB", "message": "..."}
-```
+The IACP protocol itself — transport-agnostic message format and routing rules.
 
-- **Latency**: < 1s
-- **Reliability**: High (synchronous, may queue if busy)
-- **Use case**: Synchronous calls, waiting for response
-
-## Message Format
-
+**Message Format**:
 ```json
 {
   "sender": "string — name of the sending assistant",
   "message": "string — the message content",
+  "msg_id": "optional UUID for deduplication",
+  "seq": "optional sequence number",
   "timestamp": "optional ISO 8601 timestamp",
+  "to": "optional target assistant name",
   "reply_to": "optional message ID for threading"
 }
 ```
-
-## Message Classification
-
-IACP uses **deterministic regex patterns** (not LLM) for message classification:
-
-| Category | Patterns | Behavior |
-|----------|----------|----------|
-| **TASK** | `^帮我.*`, `^处理.*`, `^创建.*` | Triggers execution |
-| **REPORT** | `.*(今天\|今日).*(做了\|完成\|进度)` | Log only, no spawn |
-| **CHATTER** | `^(好的\|收到\|谢谢\|👍)$`, `^.{1,5}$` | Ignore or lightweight reply |
 
 ## Routing Rules
 
@@ -99,16 +164,10 @@ Task Complete:
   8. Clear working_memory
 ```
 
-## Channel Isolation
-
-- Messages from different `channel_id` do NOT cross-process
-- Each channel maintains independent context
-- Cron tasks run in isolated channel domains
-- Private DM takes priority over group chat
-
 ## Security
 
 - All communication via `127.0.0.1` loopback only
+- Client authentication via `x-client-id` header
 - Message classifier prevents spam/injection
 - Routing defaults to private (safe-first)
 - Sensitive outputs never leak to public channels
