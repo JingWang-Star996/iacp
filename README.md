@@ -64,14 +64,15 @@ IACP consists of 6 layers, from the protocol spec at the top to the infrastructu
 
 ```json
 {
-  "sender": "OpenClaw",
-  "message": "Query the latest status",
+  "type": "message",
+  "from": "assistant-a",
+  "content": "Query the latest status",
   "msg_id": "550e8400-e29b-41d4-a716-446655440000",
-  "seq": 1,
-  "timestamp": "2026-04-24T20:00:00Z",
-  "to": "Hermes"
+  "timestamp": "2026-04-24T20:00:00Z"
 }
 ```
+
+Server enriches messages with `_from` (authenticated client ID) and `_receivedAt` (server timestamp).
 
 ### Message Classification (deterministic, regex-based)
 
