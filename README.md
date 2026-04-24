@@ -95,26 +95,54 @@ IACP consists of 6 layers, from the protocol spec at the top to the infrastructu
 
 ## Quick Start
 
+### Option 1: 3-line demo (Node.js)
+
+```bash
+git clone https://github.com/JingWang-Star996/iacp.git && cd iacp && npm install
+npm start                                    # Start WS relay server
+IACP_CLIENT_ID=assistant-a npm run client:demo-a   # Start assistant A (new terminal)
+IACP_CLIENT_ID=assistant-b npm run client:demo-b   # Start assistant B (new terminal)
+```
+
+### Option 2: Docker (one command)
+
+```bash
+docker compose up -d
+curl http://127.0.0.1:8765/health
+```
+
+For detailed setup instructions, see [QUICKSTART.md](QUICKSTART.md).
+
 ### Prerequisites
 
-- Multiple AI assistant instances running on the same host
-- Each assistant has its own webhook endpoint
-- A shared IM group chat (Feishu, Slack, etc.)
+- Node.js >= 16
+- npm (for Option 1)
+- Docker (for Option 2, optional)
+- Each assistant has its own webhook endpoint (for HTTP mode)
+- A shared IM group chat (Feishu, Slack, etc.) — optional, for @mention mode
 
 ### Send a Message
 
 ```bash
-curl -X POST http://127.0.0.1:8644/webhooks/agent-bus \
-  -H "Content-Type: application/json" \
-  -d '{"sender":"OpenClaw","message":"你好，Hermes！"}'
+# Start the server first: npm start
+
+# From Assistant A (terminal 1)
+IACP_CLIENT_ID=assistant-a npm run client:demo-a
+# Type a message: "Hello from A!"
+
+# From Assistant B (terminal 2)
+IACP_CLIENT_ID=assistant-b npm run client:demo-b
+# See: [assistant-b] ← [assistant-a]: Hello from A!
 ```
 
-### Check Peer Health
+### Check Server Health
 
 ```bash
-curl -X POST http://127.0.0.1:8644/webhooks/agent-bus \
-  -H "Content-Type: application/json" \
-  -d '{"sender":"healthcheck","message":"ping"}'
+curl http://127.0.0.1:8765/health
+# → {"status":"ok","protocol":"IACP","version":"1.0.0","clients":["assistant-a","assistant-b"],...}
+
+# Prometheus metrics
+curl http://127.0.0.1:8765/metrics
 ```
 
 ## Project Structure
@@ -240,11 +268,23 @@ IACP 由 6 层组成，从顶部的协议规范到底层的基础设施：
 
 ### 快速开始
 
+**方式 1：Node.js 快速体验**
+
 ```bash
-curl -X POST http://127.0.0.1:8644/webhooks/agent-bus \
-  -H "Content-Type: application/json" \
-  -d '{"sender":"OpenClaw","message":"你好，Hermes！"}'
+git clone https://github.com/JingWang-Star996/iacp.git && cd iacp && npm install
+npm start                                              # 启动 WS 中继服务器
+IACP_CLIENT_ID=助手A npm run client:demo-a             # 启动助手 A（新终端）
+IACP_CLIENT_ID=助手B npm run client:demo-b             # 启动助手 B（新终端）
 ```
+
+**方式 2：Docker 一键启动**
+
+```bash
+docker compose up -d
+curl http://127.0.0.1:8765/health
+```
+
+详细教程见 [QUICKSTART.md](QUICKSTART.md)。
 
 ### 源代码
 
@@ -322,8 +362,20 @@ IACP は 6 つのレイヤーで構成されています：
 
 ### クイックスタート
 
+**方法 1：Node.js で体験**
+
 ```bash
-curl -X POST http://127.0.0.1:8644/webhooks/agent-bus \
-  -H "Content-Type: application/json" \
-  -d '{"sender":"OpenClaw","message":"こんにちは、Hermes！"}'
+git clone https://github.com/JingWang-Star996/iacp.git && cd iacp && npm install
+npm start                                                    # WSリレーサーバー起動
+IACP_CLIENT_ID=assistant-a npm run client:demo-a             # アシスタントA起動
+IACP_CLIENT_ID=assistant-b npm run client:demo-b             # アシスタントB起動
 ```
+
+**方法 2：Docker でワンコマンド**
+
+```bash
+docker compose up -d
+curl http://127.0.0.1:8765/health
+```
+
+詳細は [QUICKSTART.md](QUICKSTART.md) を参照。

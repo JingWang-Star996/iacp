@@ -1,0 +1,36 @@
+{
+  "name": "iacp",
+  "version": "1.0.0",
+  "description": "Inter-Assistant Communication Protocol — lightweight protocol and production-grade infrastructure for local multi-assistant communication",
+  "main": "src/ws-relay/ws-server.js",
+  "scripts": {
+    "start": "node src/ws-relay/ws-server.js",
+    "start:production": "node src/monitoring/ws-server-production.js",
+    "start:cutover": "node src/cutover/dual-write-bridge.js",
+    "client:demo-a": "IACP_CLIENT_ID=assistant-a node src/ws-relay/ws-client.js",
+    "client:demo-b": "IACP_CLIENT_ID=assistant-b node src/ws-relay/ws-client.js",
+    "test": "node src/ws-relay/test-integration.js",
+    "test:reliable": "node src/reliable-layer/test-phase2.js",
+    "test:monitoring": "bash src/monitoring/test-phase3.sh"
+  },
+  "keywords": [
+    "ai-agent",
+    "multi-agent",
+    "communication",
+    "protocol",
+    "websocket",
+    "inter-assistant"
+  ],
+  "author": "JingWang-Star996",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JingWang-Star996/iacp.git"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

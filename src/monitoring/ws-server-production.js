@@ -1,17 +1,19 @@
 #!/usr/bin/env node
 /**
- * ws-server-production.js
- * OpenClaw ↔ Hermes WebSocket Bridge — Production Server
+ * ws-server-production.js — IACP Production Monitoring Server
  *
- * Features:
- *   - HTTP /health & /metrics endpoints
- *   - x-client-id header authentication
- *   - Multi-client management (hermes, openclaw)
- *   - Bidirectional message routing
- *   - Heartbeat / ping-pong
- *   - Structured JSON logging
- *   - Prometheus-compatible metrics
- *   - Graceful shutdown (SIGTERM/SIGINT)
+ * A production-ready WebSocket bridge for AI assistant instances
+ * with Prometheus metrics, health checks, and structured logging.
+ *
+ * Environment variables:
+ *   IACP_HOST                    - Bind address (default: 127.0.0.1)
+ *   IACP_WS_PORT                 - WebSocket port (default: 8765)
+ *   IACP_HEALTH_PORT             - HTTP health/metrics port (default: 8081)
+ *   IACP_CLIENT_IDS              - Comma-separated allowed client IDs
+ *   IACP_HEARTBEAT_INTERVAL_MS   - Ping interval (default: 15000)
+ *   IACP_HEARTBEAT_TIMEOUT_MS    - Pong timeout (default: 10000)
+ *   IACP_MAX_MESSAGE_BYTES       - Max message size (default: 1048576)
+ *   IACP_LOG_FILE                - Log file path (default: /tmp/iacp/ws-server.log)
  */
 
 const http = require('http');
@@ -21,13 +23,14 @@ const path = require('path');
 const os = require('os');
 
 // ─── Config ───────────────────────────────────────────────────────────────
-const HOST = process.env.WS_HOST || '127.0.0.1';
-const PORT = parseInt(process.env.WS_PORT || '8765', 10);
-const LOG_FILE = process.env.WS_LOG_FILE || '/tmp/hermes-openclaw-chat/ws-server.log';
-const VALID_CLIENT_IDS = (process.env.WS_CLIENT_IDS || 'hermes,openclaw').split(',').map(s => s.trim());
-const HEARTBEAT_INTERVAL = parseInt(process.env.WS_HEARTBEAT_MS || '30000', 10);
-const HEARTBEAT_TIMEOUT = parseInt(process.env.WS_HEARTBEAT_TIMEOUT_MS || '10000', 10);
-const MAX_MESSAGE_SIZE = parseInt(process.env.WS_MAX_MESSAGE_BYTES || '1048576', 10); // 1MB
+const HOST = process.env.IACP_HOST || '127.0.0.1';
+const PORT = parseInt(process.env.IACP_WS_PORT || process.env.IACP_PORT || '8765', 10);
+const HEALTH_PORT = parseInt(process.env.IACP_HEALTH_PORT || '8081', 10);
+const LOG_FILE = process.env.IACP_LOG_FILE || '/tmp/iacp/ws-server.log';
+const VALID_CLIENT_IDS = (process.env.IACP_CLIENT_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+const HEARTBEAT_INTERVAL = parseInt(process.env.IACP_HEARTBEAT_INTERVAL_MS || '15000', 10);
+const HEARTBEAT_TIMEOUT = parseInt(process.env.IACP_HEARTBEAT_TIMEOUT_MS || '10000', 10);
+const MAX_MESSAGE_SIZE = parseInt(process.env.IACP_MAX_MESSAGE_BYTES || '1048576', 10); // 1MB
 
 // ─── Metrics Store ────────────────────────────────────────────────────────
 const metrics = {
@@ -96,6 +99,8 @@ const httpServer = http.createServer((req, res) => {
   if (url.pathname === '/health') {
     const body = JSON.stringify({
       status: 'ok',
+      protocol: 'IACP',
+      version: '1.0.0',
       clients: getConnectedClientIds(),
       uptime: Math.floor(process.uptime()),
     });
@@ -217,21 +222,23 @@ wss.on('connection', (ws, req) => {
     // ── Add receive timestamp for latency measurement ──
     msg._receivedAt = receiveTime;
 
-    // ── Route to the other client ──
-    const otherId = clientId === 'hermes' ? 'openclaw' : 'hermes';
-    const other = clients.get(otherId);
-    if (other && other.ws.readyState === ws.OPEN) {
-      const beforeSend = Date.now();
-      other.ws.send(JSON.stringify(msg));
-      metrics.ws_messages_sent_total++;
-      const fwdLatency = Date.now() - beforeSend;
-      log('info', 'Message forwarded', { from: clientId, to: otherId, fwdLatencyMs: fwdLatency });
-    } else {
-      log('warn', 'Target client not connected, dropping message', { from: clientId, to: otherId });
+    // ── Route to all other clients ──
+    let forwarded = false;
+    for (const [otherId, other] of clients) {
+      if (otherId === clientId) continue;
+      if (other && other.ws.readyState === 1 /* OPEN */) {
+        const beforeSend = Date.now();
+        other.ws.send(JSON.stringify(msg));
+        metrics.ws_messages_sent_total++;
+        const fwdLatency = Date.now() - beforeSend;
+        log('info', 'Message forwarded', { from: clientId, to: otherId, fwdLatencyMs: fwdLatency });
+        forwarded = true;
+      }
+    }
+    if (!forwarded) {
+      log('warn', 'No target clients connected, dropping message', { from: clientId });
       metrics.ws_errors_total++;
-
-      // Send NACK back to sender
-      const nack = { type: 'nack', id: msg.id, reason: 'target_unavailable' };
+      const nack = { type: 'nack', id: msg.id, reason: 'no_targets_available' };
       ws.send(JSON.stringify(nack));
     }
   });
@@ -283,8 +290,41 @@ process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // ─── Start ────────────────────────────────────────────────────────────────
+// ─── Separate Health Server (optional, on different port) ──────────────────
+if (HEALTH_PORT !== PORT) {
+  const healthServer = http.createServer((req, res) => {
+    if (req.url === '/health') {
+      const body = JSON.stringify({
+        status: 'ok',
+        protocol: 'IACP',
+        version: '1.0.0',
+        clients: getConnectedClientIds(),
+        uptime: Math.floor(process.uptime()),
+      });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(body);
+    } else if (req.url === '/metrics') {
+      res.writeHead(302, { 'Location': `http://${HOST}:${PORT}/metrics` });
+      res.end();
+    } else {
+      res.writeHead(404);
+      res.end('Not Found');
+    }
+  });
+  healthServer.listen(HEALTH_PORT, HOST, () => {
+    log('info', 'Health server listening', { host: HOST, port: HEALTH_PORT });
+  });
+}
+
+// ─── Start ────────────────────────────────────────────────────────────────
 httpServer.listen(PORT, HOST, () => {
-  log('info', 'WS server listening', { host: HOST, port: PORT, clients: VALID_CLIENT_IDS });
+  log('info', 'WS server listening', {
+    host: HOST,
+    port: PORT,
+    clients: VALID_CLIENT_IDS.length ? VALID_CLIENT_IDS : 'any',
+    heartbeatInterval: HEARTBEAT_INTERVAL,
+    maxMessageSize: MAX_MESSAGE_SIZE,
+  });
 });
 
 module.exports = { httpServer, wss, metrics, clients };

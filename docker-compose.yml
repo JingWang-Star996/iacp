@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  # IACP WebSocket Relay Server
+  iacp-server:
+    build: .
+    container_name: iacp-server
+    ports:
+      - "8765:8765"
+      - "8081:8081"
+    environment:
+      - IACP_HOST=0.0.0.0
+      - IACP_WS_PORT=8765
+      - IACP_HEALTH_PORT=8081
+      - IACP_CLIENT_IDS=assistant-a,assistant-b
+      - IACP_HEARTBEAT_INTERVAL_MS=15000
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Demo Assistant A (interactive)
+  assistant-a:
+    build: .
+    container_name: iacp-assistant-a
+    command: ["node", "src/ws-relay/ws-client.js"]
+    environment:
+      - IACP_CLIENT_ID=assistant-a
+      - IACP_WS_URL=ws://iacp-server:8765
+    depends_on:
+      - iacp-server
+    stdin_open: true
+    tty: true
+
+  # Demo Assistant B (interactive)
+  assistant-b:
+    build: .
+    container_name: iacp-assistant-b
+    command: ["node", "src/ws-relay/ws-client.js"]
+    environment:
+      - IACP_CLIENT_ID=assistant-b
+      - IACP_WS_URL=ws://iacp-server:8765
+    depends_on:
+      - iacp-server
+    stdin_open: true
+    tty: true

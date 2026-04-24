@@ -1,24 +1,35 @@
 #!/usr/bin/env node
 /**
- * ws-server.js — WebSocket relay server for OpenClaw ↔ Hermes
+ * ws-server.js — IACP WebSocket relay server
  *
- * Listens on 127.0.0.1:8765
- * Authenticates clients via x-client-id header
- * Routes messages between connected clients
- * Implements heartbeat detection (ping/pong)
+ * A production-ready WebSocket bridge for AI assistant instances
+ * to communicate peer-to-peer on a single host.
+ *
+ * Environment variables:
+ *   IACP_HOST                    - Bind address (default: 127.0.0.1)
+ *   IACP_WS_PORT                 - WebSocket port (default: 8765)
+ *   IACP_CLIENT_IDS              - Comma-separated allowed client IDs (default: any)
+ *   IACP_HEARTBEAT_INTERVAL_MS   - Ping interval in ms (default: 15000)
+ *   IACP_HEARTBEAT_TIMEOUT_MS    - Pong timeout in ms (default: 10000)
+ *   IACP_MAX_MESSAGE_BYTES       - Max message size in bytes (default: 1048576)
+ *   IACP_LOG_FILE                - Log file path (default: stdout only)
  */
 
-const WebSocket = require('ws');
+const { WebSocketServer } = require('ws');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
 
 // ── Config ──────────────────────────────────────────────────────────────────
-const HOST = process.env.WS_HOST || '127.0.0.1';
-const PORT = parseInt(process.env.WS_PORT || '8765', 10);
-const HEARTBEAT_INTERVAL = 30_000;   // server-side ping every 30s
-const HEARTBEAT_TIMEOUT   = 10_000;  // kill connection if no pong within 10s
-const LOG_FILE = path.join(__dirname, 'server.log.jsonl');
+const HOST = process.env.IACP_HOST || '127.0.0.1';
+const PORT = parseInt(process.env.IACP_WS_PORT || process.env.IACP_PORT || '8765', 10);
+const HEARTBEAT_INTERVAL = parseInt(process.env.IACP_HEARTBEAT_INTERVAL_MS || '15000', 10);
+const HEARTBEAT_TIMEOUT  = parseInt(process.env.IACP_HEARTBEAT_TIMEOUT_MS || '10000', 10);
+const MAX_MESSAGE_BYTES  = parseInt(process.env.IACP_MAX_MESSAGE_BYTES || '1048576', 10);
+const ALLOWED_CLIENTS    = process.env.IACP_CLIENT_IDS
+  ? process.env.IACP_CLIENT_IDS.split(',').map(s => s.trim())
+  : null; // null = allow any
+const LOG_FILE = process.env.IACP_LOG_FILE || null;
 
 // ── Structured logger ───────────────────────────────────────────────────────
 function log(level, event, extra = {}) {
@@ -29,14 +40,18 @@ function log(level, event, extra = {}) {
     ...extra,
   };
   const line = JSON.stringify(entry);
-  // always stdout
   if (level === 'error') {
     console.error(line);
   } else {
     console.log(line);
   }
-  // also append to log file
-  try { fs.appendFileSync(LOG_FILE, line + '\n'); } catch { /* ignore */ }
+  if (LOG_FILE) {
+    try {
+      const dir = path.dirname(LOG_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.appendFileSync(LOG_FILE, line + '\n');
+    } catch { /* ignore */ }
+  }
 }
 
 // ── Client registry ─────────────────────────────────────────────────────────
@@ -46,7 +61,7 @@ function broadcast(senderId, message) {
   const data = typeof message === 'string' ? message : JSON.stringify(message);
   for (const [id, info] of clients) {
     if (id === senderId) continue;
-    if (info.ws.readyState === WebSocket.OPEN) {
+    if (info.ws.readyState === 1 /* OPEN */) {
       info.ws.send(data);
     }
   }
@@ -69,6 +84,11 @@ function verifyClient(info, cb) {
     cb(false, 401, 'Unauthorized: missing x-client-id');
     return;
   }
+  if (ALLOWED_CLIENTS && !ALLOWED_CLIENTS.includes(clientId)) {
+    log('warn', 'auth_denied', { clientId, allowed: ALLOWED_CLIENTS });
+    cb(false, 403, 'Forbidden: client ID not in allowed list');
+    return;
+  }
   if (clients.has(clientId)) {
     log('warn', 'auth_duplicate', { clientId });
     cb(false, 409, 'Conflict: client already connected');
@@ -77,21 +97,14 @@ function verifyClient(info, cb) {
   cb(true);
 }
 
-// ── WebSocket server ────────────────────────────────────────────────────────
-const wss = new WebSocket.Server({
-  host: HOST,
-  port: PORT,
-  verifyClient,
-  // use an existing http server so we can add a health endpoint if needed
-});
-
-// ── Health endpoint on same port ────────────────────────────────────────────
-// We'll create a standalone HTTP server and pass it to ws
+// ── Health endpoint ─────────────────────────────────────────────────────────
 const healthServer = http.createServer((req, res) => {
   if (req.url === '/health') {
     const status = {
       status: 'ok',
-      uptime: process.uptime(),
+      protocol: 'IACP',
+      version: '1.0.0',
+      uptime: Math.round(process.uptime()),
       clients: Array.from(clients.keys()),
       clientCount: clients.size,
       timestamp: new Date().toISOString(),
@@ -104,12 +117,14 @@ const healthServer = http.createServer((req, res) => {
   }
 });
 
-const wssOnHttp = new WebSocket.Server({
+// ── WebSocket server ────────────────────────────────────────────────────────
+const wss = new WebSocketServer({
   server: healthServer,
   verifyClient,
+  maxPayload: MAX_MESSAGE_BYTES,
 });
 
-wssOnHttp.on('connection', (ws, req) => {
+wss.on('connection', (ws, req) => {
   const clientId = req.headers['x-client-id'];
   ws.isAlive = true;
 
@@ -122,9 +137,9 @@ wssOnHttp.on('connection', (ws, req) => {
 
   log('info', 'client_connected', { clientId, ip: req.socket.remoteAddress });
 
-  // heartbeat: send server ping, expect pong
+  // Server heartbeat: ping clients, expect pong
   const hbTimer = setInterval(() => {
-    if (ws.readyState !== WebSocket.OPEN) return;
+    if (ws.readyState !== 1) return;
     if (!ws.isAlive) {
       log('warn', 'heartbeat_timeout', { clientId });
       ws.terminate();
@@ -132,30 +147,32 @@ wssOnHttp.on('connection', (ws, req) => {
     }
     ws.isAlive = false;
     ws.ping();
-    // if no pong within timeout, kill
-    clients.get(clientId).pongTimer = setTimeout(() => {
-      if (clients.has(clientId)) {
-        log('warn', 'pong_timeout', { clientId });
-        ws.terminate();
-      }
-    }, HEARTBEAT_TIMEOUT);
+    const info = clients.get(clientId);
+    if (info) {
+      info.pongTimer = setTimeout(() => {
+        if (clients.has(clientId)) {
+          log('warn', 'pong_timeout', { clientId });
+          ws.terminate();
+        }
+      }, HEARTBEAT_TIMEOUT);
+    }
   }, HEARTBEAT_INTERVAL);
 
   clients.get(clientId).heartbeatTimer = hbTimer;
 
-  // client pong
+  // Client pong response
   ws.on('pong', () => {
     ws.isAlive = true;
     const info = clients.get(clientId);
     if (info) clearTimeout(info.pongTimer);
   });
 
-  // client heartbeat ping (from client side)
+  // Client-initiated ping
   ws.on('ping', () => {
     ws.pong();
   });
 
-  // message handling
+  // Message handling
   ws.on('message', (raw) => {
     let msg;
     try {
@@ -166,19 +183,18 @@ wssOnHttp.on('connection', (ws, req) => {
       return;
     }
 
-    // enrich message with server-side metadata
+    // Enrich with server metadata
     msg._receivedAt = new Date().toISOString();
     msg._from = clientId;
 
-    // handle control messages locally
+    // Handle control messages locally
     if (msg.type === 'ack' || msg.type === 'pong' || msg.type === 'ping') {
       return;
     }
 
-    // relay to other clients
+    // Relay to other clients
     broadcast(clientId, msg);
 
-    // log
     log('info', 'message_routed', {
       clientId,
       msgType: msg.type,
@@ -197,13 +213,12 @@ wssOnHttp.on('connection', (ws, req) => {
 function shutdown(signal) {
   log('info', 'server_shutdown', { signal });
   for (const [id] of clients) removeClient(id);
-  wssOnHttp.close(() => {
+  wss.close(() => {
     healthServer.close(() => {
       log('info', 'server_stopped');
       process.exit(0);
     });
   });
-  // force exit after 5s
   setTimeout(() => process.exit(1), 5000);
 }
 
@@ -212,7 +227,14 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 
 // ── Start ───────────────────────────────────────────────────────────────────
 healthServer.listen(PORT, HOST, () => {
-  log('info', 'server_started', { host: HOST, port: PORT, pid: process.pid });
+  log('info', 'server_started', {
+    host: HOST,
+    port: PORT,
+    pid: process.pid,
+    allowedClients: ALLOWED_CLIENTS || 'any',
+    heartbeatInterval: HEARTBEAT_INTERVAL,
+    maxMessageBytes: MAX_MESSAGE_BYTES,
+  });
 });
 
-module.exports = { wss: wssOnHttp, healthServer, clients };
+module.exports = { wss, healthServer, clients };
