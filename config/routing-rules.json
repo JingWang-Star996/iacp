@@ -1,0 +1,36 @@
+{
+  "version": "1.0",
+  "description": "Output routing decision table — determined at spawn time",
+  "rules": [
+    {
+      "source": "private_dm",
+      "task_type": "any",
+      "output": "original_sender_private"
+    },
+    {
+      "source": "group_chat",
+      "task_type": "diagnosis|analysis|review",
+      "output": "admin_private"
+    },
+    {
+      "source": "group_chat",
+      "task_type": "daily_report",
+      "output": "admin_private"
+    },
+    {
+      "source": "cron",
+      "task_type": "auto_task",
+      "output": "admin_private"
+    },
+    {
+      "source": "agent_peer",
+      "task_type": "task_delegation",
+      "output": "original_sender"
+    }
+  ],
+  "default_rule": {
+    "condition": "uncertain",
+    "output": "admin_private",
+    "reason": "Safe-first: private is safer than public"
+  }
+}

@@ -1,0 +1,25 @@
+# OpenClaw Agent Walkie-Talkie Configuration Example
+# Copy this to your OpenClaw config and adjust URLs
+
+# Peer Agent configuration
+peer_agent:
+  name: "Hermes"
+  webhook_url: "http://127.0.0.1:8644/webhooks/agent-bus"
+  health_check_url: "http://127.0.0.1:8644/health"
+  communication_mode: "webhook"  # webhook | mention | proxy
+
+# Shared group chat
+shared_channel:
+  platform: "feishu"
+  chat_id: "oc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  peer_agent_mention: "@Hermes"
+
+# Message classifier
+classifier:
+  config_file: "config/message-classifier.json"
+  enable: true
+
+# Routing rules
+routing:
+  config_file: "config/routing-rules.json"
+  default_route: "admin_private"

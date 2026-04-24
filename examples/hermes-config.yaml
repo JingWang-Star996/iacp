@@ -1,0 +1,18 @@
+# Hermes Agent Walkie-Talkie Configuration Example
+# Copy this to your Hermes config and adjust URLs
+
+peer_agent:
+  name: "OpenClaw"
+  webhook_url: "http://127.0.0.1:18800/agent"
+  health_check_url: "http://127.0.0.1:18789/health"
+  communication_mode: "mention"  # webhook | mention | proxy
+
+shared_channel:
+  platform: "feishu"
+  chat_id: "oc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  peer_agent_name: "OpenClaw"
+
+routes:
+  agent-bus:
+    description: "Receive messages from peer Agent"
+    action: "process_and_respond"

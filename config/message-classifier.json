@@ -1,0 +1,38 @@
+{
+  "version": "1.0",
+  "description": "Message classifier rules — deterministic regex-based classification",
+  "categories": {
+    "TASK": {
+      "description": "Task instruction — triggers execution",
+      "patterns": [
+        "^帮我.*", "^请帮.*", "^处理.*", "^查询.*",
+        "^创建.*", "^修改.*", "^分析.*", "^生成.*",
+        "^发送.*", "^通知.*", "^提醒.*"
+      ],
+      "action": "Enter main context, trigger task processing",
+      "spawn_allowed": true
+    },
+    "REPORT": {
+      "description": "Daily report / status — log only",
+      "patterns": [
+        ".*(今天|今日).*(做了|完成|进度|进展)",
+        ".*(?:完成|进度|优化|修复|调整|进行中).*"
+      ],
+      "action": "Log to report stream, lightweight confirm, no spawn",
+      "spawn_allowed": false
+    },
+    "CHATTER": {
+      "description": "Casual chat — ignore or lightweight reply",
+      "patterns": [
+        "^(好的|收到|谢谢|👍|👌|✅)$",
+        "^.{1,5}$"
+      ],
+      "action": "Ignore or lightweight reply, no spawn",
+      "spawn_allowed": false
+    }
+  },
+  "routing_defaults": {
+    "uncertain": "REPORT",
+    "low_confidence_action": "Wait for user clarification"
+  }
+}
