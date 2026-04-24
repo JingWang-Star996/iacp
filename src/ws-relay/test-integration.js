@@ -68,9 +68,11 @@ function waitForMessage(ws, filterFn, timeoutMs = 5000) {
 
 // ── Import server module ────────────────────────────────────────────────────
 // We require the server module which starts listening on the configured port
-// But we need to override the port. The server reads WS_PORT env.
-process.env.WS_PORT = String(PORT);
-process.env.WS_HOST = HOST;
+// But we need to override the port. The server reads IACP_ env vars.
+process.env.IACP_PORT = String(PORT);
+process.env.IACP_HOST = HOST;
+// Also set legacy vars for backward compat
+process.env.IACP_WS_PORT = String(PORT);
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 async function run() {
