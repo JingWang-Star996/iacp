@@ -123,6 +123,11 @@ curl -X POST http://127.0.0.1:8644/webhooks/agent-bus \
 iacp/
 ├── README.md                    # Multi-language documentation
 ├── ARCHITECTURE.md              # Protocol specification
+├── src/
+│   ├── ws-relay/                # L1: WebSocket relay server + clients
+│   ├── reliable-layer/          # L2: ACK, retry, dedup, offline queue
+│   ├── monitoring/              # L3: Prometheus metrics, health checks, dashboard
+│   └── cutover/                 # L4: Dual-write bridge, zero-downtime switch
 ├── scripts/
 │   ├── send-to-peer.sh          # Send message to peer
 │   └── check-peer.sh            # Peer health check
@@ -137,16 +142,12 @@ iacp/
     └── channel-domains.md           # Channel isolation rules
 ```
 
-## Reference Implementation (hermes-ws-upgrade)
-
-The full production infrastructure lives in a separate repository: [hermes-ws-upgrade](https://github.com/JingWang-Star996/hermes-ws-upgrade) (private). It implements all 6 IACP layers:
-
 | Layer | Implementation |
 |-------|---------------|
-| **L1: WS Relay** | `ws-server.js` — Custom WS bridge with auth, heartbeat, routing |
-| **L2: Reliable Layer** | `reliable-ws-layer.js` — ACK, retry, dedup, offline queue, replay |
-| **L3: Monitoring** | `ws-server-production.js` — Prometheus metrics, health endpoints, dashboard |
-| **L4: Cutover** | `dual-write-bridge.js`, `switch-to-ws.sh`, `rollback-to-file.sh` |
+| **L1: WS Relay** | `src/ws-relay/ws-server.js` — Custom WS bridge with auth, heartbeat, routing |
+| **L2: Reliable Layer** | `src/reliable-layer/reliable-ws-layer.js` — ACK, retry, dedup, offline queue, replay |
+| **L3: Monitoring** | `src/monitoring/ws-server-production.js` — Prometheus metrics, health endpoints, dashboard |
+| **L4: Cutover** | `src/cutover/dual-write-bridge.js`, `switch-to-ws.sh`, `rollback-to-file.sh` |
 | **L5: Context Isolation** | Message classifier + routing rules + 4-domain architecture |
 | **L6: Protocol** | Message format + routing spec (this repo) |
 
@@ -245,16 +246,16 @@ curl -X POST http://127.0.0.1:8644/webhooks/agent-bus \
   -d '{"sender":"OpenClaw","message":"你好，Hermes！"}'
 ```
 
-### 参考实现
+### 源代码
 
-完整的生产基础设施在另一个仓库中：[hermes-ws-upgrade](https://github.com/JingWang-Star996/hermes-ws-upgrade)（私有）。它实现了 IACP 的全部 6 层：
+IACP 全部 6 层的完整生产级实现已包含在本仓库的 `src/` 目录下：
 
 | 层级 | 实现 |
 |------|------|
-| **L1: WS 中继** | `ws-server.js` — 自研 WS 桥，认证/心跳/路由 |
-| **L2: 可靠层** | `reliable-ws-layer.js` — ACK/重试/去重/离线队列/重放 |
-| **L3: 监控** | `ws-server-production.js` — Prometheus/健康检查/Dashboard |
-| **L4: 切换** | `dual-write-bridge.js` / `switch-to-ws.sh` / `rollback-to-file.sh` |
+| **L1: WS 中继** | `src/ws-relay/ws-server.js` — 自研 WS 桥，认证/心跳/路由 |
+| **L2: 可靠层** | `src/reliable-layer/reliable-ws-layer.js` — ACK/重试/去重/离线队列/重放 |
+| **L3: 监控** | `src/monitoring/ws-server-production.js` — Prometheus/健康检查/Dashboard |
+| **L4: 切换** | `src/cutover/dual-write-bridge.js` / `switch-to-ws.sh` / `rollback-to-file.sh` |
 | **L5: 隔离** | 消息分类器 + 路由规则 + 四域架构 |
 | **L6: 协议** | 消息格式 + 路由规范（本仓库） |
 

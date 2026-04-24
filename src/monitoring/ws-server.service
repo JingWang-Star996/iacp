@@ -1,0 +1,22 @@
+[Unit]
+Description=OpenClaw-Hermes WebSocket Bridge
+After=network.target
+
+[Service]
+Type=simple
+User=z3129119
+WorkingDirectory=/tmp/hermes-openclaw-chat
+ExecStart=/home/z3129119/.nvm/versions/node/v24.14.0/bin/node /home/z3129119/.openclaw/workspace/projects/hermes-ws-upgrade/phase3/ws-server-production.js
+Restart=always
+RestartSec=5
+StandardOutput=append:/tmp/hermes-openclaw-chat/ws-server-stdout.log
+StandardError=append:/tmp/hermes-openclaw-chat/ws-server-stderr.log
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/tmp/hermes-openclaw-chat
+
+[Install]
+WantedBy=multi-user.target

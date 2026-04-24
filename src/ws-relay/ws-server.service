@@ -1,0 +1,29 @@
+[Unit]
+Description=OpenClaw-Hermes WebSocket Relay Server
+Documentation=file:///home/z3129119/.openclaw/workspace/projects/hermes-ws-upgrade/phase1/README.md
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node /home/z3129119/.openclaw/workspace/projects/hermes-ws-upgrade/phase1/ws-server.js
+Restart=always
+RestartSec=5
+WorkingDirectory=/home/z3129119/.openclaw/workspace/projects/hermes-ws-upgrade/phase1
+
+# Environment
+Environment=WS_HOST=127.0.0.1
+Environment=WS_PORT=8765
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/z3129119/.openclaw/workspace/projects/hermes-ws-upgrade/phase1
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ws-server
+
+[Install]
+WantedBy=multi-user.target

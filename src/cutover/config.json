@@ -1,0 +1,67 @@
+{
+  "description": "Hermes ↔ OpenClaw 生产切换配置 — Phase 4",
+  "version": "2.0.0",
+
+  "ws": {
+    "server_url": "ws://127.0.0.1:8765",
+    "client_id": "hermes",
+    "connect_timeout_ms": 10000,
+    "handshake_timeout_ms": 10000,
+    "close_timeout_ms": 5000
+  },
+
+  "reconnect": {
+    "max_interval_ms": 30000,
+    "base_delay_ms": 1000,
+    "max_retries": 3,
+    "jitter_ms": 1000
+  },
+
+  "heartbeat": {
+    "interval_sec": 25,
+    "ack_timeout_ms": 500
+  },
+
+  "dual_write": {
+    "enabled": false,
+    "auto_disable_threshold": 5,
+    "file_channel_path": "/tmp/hermes-openclaw-chat/openclaw_to_hermes.json"
+  },
+
+  "health_check": {
+    "port": 8081,
+    "endpoints": {
+      "health": "/health",
+      "status": "/status"
+    },
+    "alert_threshold_ms": 200,
+    "rollback_threshold_ms": 500,
+    "check_interval_sec": 30
+  },
+
+  "logging": {
+    "level": "info",
+    "file": "./switch-to-ws.log",
+    "rollback_log": "./rollback-to-file.log"
+  },
+
+  "migration": {
+    "source_dir": "/tmp/hermes-openclaw-chat",
+    "source_pattern": "openclaw_to_hermes*.json",
+    "batch_size": 500,
+    "dry_run_default": true
+  },
+
+  "services": {
+    "hermes_ws_client": "hermes-ws-client",
+    "file_poll_daemon": "hermes-file-poll"
+  },
+
+  "binaries": {
+    "ws_client_start": "../ws-client/start.sh",
+    "dual_write_bridge": "./dual-write-bridge.js",
+    "switch_script": "./switch-to-ws.sh",
+    "rollback_script": "./rollback-to-file.sh",
+    "migration_script": "./migrate-v1-to-v2.js"
+  }
+}

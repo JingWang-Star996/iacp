@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hermes ↔ OpenClaw WS Bridge Monitor</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; padding: 2rem; }
+  h1 { font-size: 1.5rem; margin-bottom: 1.5rem; color: #38bdf8; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+  .card { background: #1e293b; border-radius: 12px; padding: 1.5rem; border: 1px solid #334155; }
+  .card h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 0.75rem; }
+  .status-dot { width: 14px; height: 14px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+  .green { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
+  .red { background: #ef4444; box-shadow: 0 0 8px #ef4444; }
+  .value { font-size: 2rem; font-weight: 700; }
+  .clients-list { margin-top: 0.5rem; }
+  .client-tag { display: inline-block; background: #334155; padding: 2px 10px; border-radius: 6px; margin: 2px 4px 2px 0; font-size: 0.85rem; }
+  .client-tag.connected { background: #166534; color: #bbf7d0; }
+  .metric-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #334155; }
+  .metric-row:last-child { border-bottom: none; }
+  .metric-label { color: #94a3b8; }
+  .metric-value { font-weight: 600; font-family: 'SF Mono', 'Fira Code', monospace; }
+  #refresh { color: #64748b; font-size: 0.8rem; margin-top: 1rem; }
+  .latency-bar { height: 8px; border-radius: 4px; background: #334155; margin-top: 8px; overflow: hidden; }
+  .latency-fill { height: 100%; background: linear-gradient(90deg, #22c55e, #eab308, #ef4444); transition: width 0.5s; }
+</style>
+</head>
+<body>
+<h1>🔗 Hermes ↔ OpenClaw WS Bridge</h1>
+
+<div class="grid">
+  <!-- Connection Status -->
+  <div class="card">
+    <h2>Connection Status</h2>
+    <div>
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">Checking...</span>
+    </div>
+    <div class="clients-list" id="clientsList"></div>
+    <div class="metric-row" style="margin-top:12px;">
+      <span class="metric-label">Uptime</span>
+      <span class="metric-value" id="uptime">--</span>
+    </div>
+  </div>
+
+  <!-- Message Counters -->
+  <div class="card">
+    <h2>Message Counters</h2>
+    <div class="metric-row">
+      <span class="metric-label">Received</span>
+      <span class="metric-value" id="msgReceived">--</span>
+    </div>
+    <div class="metric-row">
+      <span class="metric-label">Sent</span>
+      <span class="metric-value" id="msgSent">--</span>
+    </div>
+    <div class="metric-row">
+      <span class="metric-label">Errors</span>
+      <span class="metric-value" id="msgErrors" style="color:#ef4444;">--</span>
+    </div>
+  </div>
+
+  <!-- Latency -->
+  <div class="card">
+    <h2>Message Latency</h2>
+    <div class="value" id="avgLatency">-- ms</div>
+    <div class="latency-bar"><div class="latency-fill" id="latencyBar" style="width:0%"></div></div>
+    <div class="metric-row" style="margin-top:8px;">
+      <span class="metric-label">P50</span>
+      <span class="metric-value" id="p50">--</span>
+    </div>
+    <div class="metric-row">
+      <span class="metric-label">P95</span>
+      <span class="metric-value" id="p95">--</span>
+    </div>
+  </div>
+</div>
+
+<div id="refresh">Refreshing every 5 seconds...</div>
+
+<script>
+const API_BASE = window.location.origin; // same origin as this page
+
+function formatUptime(seconds) {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const parts = [];
+  if (d > 0) parts.push(`${d}d`);
+  if (h > 0) parts.push(`${h}h`);
+  parts.push(`${m}m`);
+  return parts.join(' ');
+}
+
+async function refresh() {
+  try {
+    // Health
+    const healthRes = await fetch(`${API_BASE}/health`);
+    const health = await healthRes.json();
+    document.getElementById('statusDot').className = health.status === 'ok' ? 'status-dot green' : 'status-dot red';
+    document.getElementById('statusText').textContent = health.status.toUpperCase();
+    document.getElementById('uptime').textContent = formatUptime(health.uptime);
+
+    const clientsDiv = document.getElementById('clientsList');
+    const knownClients = ['hermes', 'openclaw'];
+    clientsDiv.innerHTML = knownClients.map(c =>
+      `<span class="client-tag ${health.clients.includes(c) ? 'connected' : ''}">${c}</span>`
+    ).join('');
+
+    // Metrics
+    const metricsRes = await fetch(`${API_BASE}/metrics`);
+    const metricsText = await metricsRes.text();
+    const parseMetric = (name) => {
+      const match = metricsText.match(new RegExp(`^${name} (\\S+)`, 'm'));
+      return match ? parseFloat(match[1]) : null;
+    };
+
+    document.getElementById('msgReceived').textContent = parseMetric('ws_messages_received_total') ?? '--';
+    document.getElementById('msgSent').textContent = parseMetric('ws_messages_sent_total') ?? '--';
+    document.getElementById('msgErrors').textContent = parseMetric('ws_errors_total') ?? '--';
+
+    // Latency parsing
+    const latencyData = [];
+    const countMatch = metricsText.match(/^ws_message_latency_ms_bucket\{le="([^"]+)"\} (\S+)$/gm);
+    if (countMatch) {
+      const buckets = {};
+      countMatch.forEach(line => {
+        const m = line.match(/\{le="([^"]+)"\} (\S+)/);
+        if (m) buckets[m[1]] = parseInt(m[2], 10);
+      });
+      const le50 = buckets['le50'] || 0;
+      const le100 = buckets['le100'] || 0;
+      const le250 = buckets['le250'] || 0;
+      const le500 = buckets['le500'] || 0;
+      const total = buckets['le+Inf'] || 0;
+
+      // Estimate P50 and P95
+      document.getElementById('p50').textContent = total > 0 && le50 / total >= 0.5 ? '≤50ms' :
+        total > 0 && le100 / total >= 0.5 ? '≤100ms' :
+        total > 0 && le250 / total >= 0.5 ? '≤250ms' :
+        total > 0 && le500 / total >= 0.5 ? '≤500ms' :
+        total > 0 ? '>500ms' : '--';
+      document.getElementById('p95').textContent = total > 0 && le500 / total >= 0.95 ? '≤500ms' :
+        total > 0 ? '>500ms' : '--';
+
+      // Avg latency
+      const sumMatch = metricsText.match(/^ws_message_latency_ms_sum (\S+)$/m);
+      const sumVal = sumMatch ? parseFloat(sumMatch[1]) : 0;
+      const avg = total > 0 ? (sumVal / total).toFixed(1) : '--';
+      document.getElementById('avgLatency').textContent = avg === '--' ? '-- ms' : `${avg} ms`;
+
+      // Bar fill based on percentage of messages under 50ms
+      const pct = total > 0 ? Math.min(100, (le50 / total) * 100) : 0;
+      document.getElementById('latencyBar').style.width = `${pct}%`;
+    }
+  } catch (e) {
+    document.getElementById('statusDot').className = 'status-dot red';
+    document.getElementById('statusText').textContent = 'OFFLINE';
+  }
+}
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
